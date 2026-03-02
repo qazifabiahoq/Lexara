@@ -59,10 +59,10 @@ export default function Upload() {
 
     try {
       const formData = new FormData();
-      formData.append('contract', file);
+      formData.append('file', file);
 
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-      const response = await axios.post(`${apiUrl}/api/analyze`, formData, {
+      const response = await axios.post(`${apiUrl}/analyze`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
