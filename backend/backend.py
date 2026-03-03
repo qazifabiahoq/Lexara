@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
 
+os.environ["GOOGLE_API_KEY"] = os.environ.get("GEMINI_API_KEY", "")
+
 app = FastAPI()
 
 app.add_middleware(
