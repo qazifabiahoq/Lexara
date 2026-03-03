@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Download, Copy, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts';
 import Navigation from '../components/Navigation';
+import jsPDF from 'jspdf';
 
 interface Clause {
   id: string;
@@ -96,7 +97,95 @@ export default function Report() {
   };
 
   const downloadReport = () => {
-    alert('Download functionality would be implemented with PDF generation library');
+    if (!report) return;
+    const pdf = new jsPDF({ unit: 'pt', format: 'a4' });
+    const margin = 40;
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const maxWidth = pageWidth - margin * 2;
+    let y = margin;
+
+    const addText = (text: string, size: number, bold: boolean, color: [number, number, number] = [255, 255, 255]) => {
+      pdf.setFontSize(size);
+      pdf.setFont('helvetica', bold ? 'bold' : 'normal');
+      pdf.setTextColor(...color);
+      const lines = pdf.splitTextToSize(text, maxWidth);
+      if (y + lines.length * size * 1.3 > pdf.internal.pageSize.getHeight() - margin) {
+        pdf.addPage();
+        y = margin;
+      }
+      pdf.text(lines, margin, y);
+      y += lines.length * size * 1.4;
+    };
+
+    const addGap = (gap = 10) => { y += gap; };
+
+    // Dark background
+    pdf.setFillColor(10, 25, 47);
+    pdf.rect(0, 0, pageWidth, pdf.internal.pageSize.getHeight(), 'F');
+
+    // Header
+    addText('LEXARA', 18, true, [212, 175, 55]);
+    addText('Contract Analysis Report', 14, false, [180, 180, 180]);
+    addText(`File: ${report.filename}   |   Date: ${report.date}`, 10, false, [140, 140, 140]);
+    addGap(16);
+
+    // Overall risk
+    const riskColor: [number, number, number] = report.overallRisk === 'high' ? [239, 68, 68] : report.overallRisk === 'medium' ? [245, 158, 11] : [16, 185, 129];
+    addText(`Overall Risk: ${report.overallRisk.toUpperCase()} (${report.riskPercentage}%)`, 13, true, riskColor);
+    addGap(8);
+
+    // Executive summary
+    addText('EXECUTIVE SUMMARY', 12, true, [212, 175, 55]);
+    addText(report.executiveSummary, 10, false, [220, 220, 220]);
+    addGap(14);
+
+    // Top dangerous clauses
+    if (report.topDangerousClauses.length > 0) {
+      addText('TOP DANGEROUS CLAUSES', 12, true, [212, 175, 55]);
+      report.topDangerousClauses.forEach((c, i) => {
+        addText(`${i + 1}. ${c.title}`, 10, true, [239, 68, 68]);
+        addText(c.explanation, 10, false, [200, 200, 200]);
+        addGap(4);
+      });
+      addGap(10);
+    }
+
+    // All clauses
+    addText('CLAUSE ANALYSIS', 12, true, [212, 175, 55]);
+    report.clauses.forEach((c) => {
+      const cr: [number, number, number] = c.risk === 'high' ? [239, 68, 68] : c.risk === 'medium' ? [245, 158, 11] : [16, 185, 129];
+      addText(`${c.title}  [${c.risk.toUpperCase()}]`, 10, true, cr);
+      addText(c.explanation, 10, false, [200, 200, 200]);
+      addGap(6);
+    });
+
+    // Contradictions
+    if (report.contradictions.length > 0) {
+      addText('CONTRADICTIONS', 12, true, [212, 175, 55]);
+      report.contradictions.forEach((c, i) => {
+        addText(`${i + 1}. ${c.description}`, 10, false, [200, 200, 200]);
+        addGap(4);
+      });
+      addGap(10);
+    }
+
+    // Missing protections
+    if (report.missingProtections.length > 0) {
+      addText('MISSING PROTECTIONS', 12, true, [212, 175, 55]);
+      report.missingProtections.forEach((m, i) => {
+        const mr: [number, number, number] = m.risk === 'high' ? [239, 68, 68] : [245, 158, 11];
+        addText(`${i + 1}. ${m.title}  [${m.risk.toUpperCase()}]`, 10, true, mr);
+        addText(m.explanation, 10, false, [200, 200, 200]);
+        addGap(4);
+      });
+      addGap(10);
+    }
+
+    // Redline memo
+    addText('REDLINE MEMO', 12, true, [212, 175, 55]);
+    addText(memo, 10, false, [220, 220, 220]);
+
+    pdf.save(`Lexara-Report-${report.filename.replace('.pdf', '')}.pdf`);
   };
 
   return (

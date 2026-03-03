@@ -87,7 +87,7 @@ export default function Upload() {
         <div className="max-w-3xl mx-auto">
           <h1 className="text-4xl font-bold text-white text-center mb-4">Upload Your Contract</h1>
           <p className="text-gray-muted text-center mb-12">
-            Upload a PDF contract and get comprehensive analysis in 30 seconds
+            Upload a PDF contract and get comprehensive analysis in about 2 minutes
           </p>
 
           {!isLoading ? (
@@ -143,7 +143,7 @@ export default function Upload() {
               <h3 className="text-2xl font-bold text-white mb-3">
                 Lexara is reviewing your contract
               </h3>
-              <p className="text-gray-muted mb-8">This takes about 30 seconds</p>
+              <p className="text-gray-muted mb-8">This takes about 2 minutes</p>
 
               <div className="space-y-4">
                 {loadingSteps.map((step, index) => (
