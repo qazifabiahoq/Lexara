@@ -69,6 +69,7 @@ export default function Upload() {
       });
 
       clearInterval(stepInterval);
+      sessionStorage.setItem('lexara_report', JSON.stringify(response.data));
       navigate('/report', { state: { report: response.data } });
     } catch (error) {
       clearInterval(stepInterval);

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Download, Copy, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts';
 import Navigation from '../components/Navigation';
@@ -39,7 +39,10 @@ interface Report {
 
 export default function Report() {
   const location = useLocation();
-  const report = location.state?.report as Report;
+  const navigate = useNavigate();
+  const stateReport = location.state?.report as Report | undefined;
+  const storedReport = sessionStorage.getItem('lexara_report');
+  const report = stateReport ?? (storedReport ? JSON.parse(storedReport) as Report : null);
   const [expandedClause, setExpandedClause] = useState<string | null>(null);
   const [memo, setMemo] = useState(report?.redlineMemo || '');
 
@@ -51,6 +54,12 @@ export default function Report() {
           <div className="max-w-7xl mx-auto text-center">
             <h1 className="text-3xl font-bold text-white">No report found</h1>
             <p className="text-gray-muted mt-4">Please upload a contract first</p>
+            <button
+              onClick={() => navigate('/upload')}
+              className="mt-6 bg-gold hover:bg-gold/90 text-navy-primary px-6 py-3 rounded-lg font-semibold transition-colors"
+            >
+              Go to Upload
+            </button>
           </div>
         </div>
       </div>
