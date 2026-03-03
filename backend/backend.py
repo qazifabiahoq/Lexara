@@ -10,6 +10,7 @@ import json
 import re
 import io
 import uuid
+import asyncio
 import pypdf
 from datetime import date as date_type
 
@@ -24,7 +25,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Each agent is standalone (no sub_agents) to avoid function_call response issues
 clause_extractor_agent = LlmAgent(
     name='clause_extractor_agent',
     model='gemini-2.5-flash',
@@ -127,19 +127,16 @@ def extract_json(text: str):
     """Try multiple strategies to extract valid JSON from LLM output."""
     if not text:
         return None
-    # Strategy 1: direct parse
     try:
         return json.loads(text)
     except (json.JSONDecodeError, TypeError):
         pass
-    # Strategy 2: extract from ```json ... ``` code block
     match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', text)
     if match:
         try:
             return json.loads(match.group(1))
         except (json.JSONDecodeError, TypeError):
             pass
-    # Strategy 3: find the outermost {...} block
     match = re.search(r'\{[\s\S]*\}', text)
     if match:
         try:
@@ -154,7 +151,6 @@ async def analyze_contract(file: UploadFile = File(...)):
     try:
         content = await file.read()
 
-        # Extract text from PDF using pypdf
         try:
             pdf_reader = pypdf.PdfReader(io.BytesIO(content))
             text = ""
@@ -168,12 +164,17 @@ async def analyze_contract(file: UploadFile = File(...)):
         if not text.strip():
             raise HTTPException(status_code=400, detail="Could not extract text from file")
 
-        # Run agents sequentially — no sub_agents, no function_call issues
+        # Step 1: extract clauses
         clauses = await run_agent(clause_extractor_agent, text)
-        risks = await run_agent(risk_analyzer_agent, clauses)
-        contradictions = await run_agent(contradiction_detector_agent, clauses)
-        missing = await run_agent(missing_clause_agent, clauses)
 
+        # Steps 2-4: run in parallel — all take clauses as input
+        risks, contradictions, missing = await asyncio.gather(
+            run_agent(risk_analyzer_agent, clauses),
+            run_agent(contradiction_detector_agent, clauses),
+            run_agent(missing_clause_agent, clauses),
+        )
+
+        # Step 5: compile final report
         summary_input = (
             f"CONTRACT CLAUSES:\n{clauses}\n\n"
             f"RISK ANALYSIS:\n{risks}\n\n"
