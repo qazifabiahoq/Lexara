@@ -12,7 +12,7 @@ export default function Footer() {
               <span className="text-lg font-bold text-white">Lexara</span>
             </div>
             <p className="text-gray-muted text-sm max-w-xs">
-              First-pass contract review in 30 seconds. Built for legal teams.
+              First-pass contract review in about 2 minutes. Built for legal teams.
             </p>
           </div>
 
