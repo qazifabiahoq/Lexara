@@ -91,7 +91,8 @@ Rules:
 - Use only "high", "medium", or "low" (lowercase) for all risk fields.
 - If there are no contradictions, set "contradictions" to an empty array [].
 - If there are no missing protections, set "missingProtections" to an empty array [].
-- Return ONLY the JSON object, nothing else.''',
+- Return ONLY the JSON object, nothing else.
+- Write the redlineMemo in plain text only. Do not use markdown formatting (no **bold**, no * bullets, no # headers). Use plain numbered lists and line breaks instead.''',
 )
 
 
