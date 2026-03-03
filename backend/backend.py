@@ -6,6 +6,11 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
+import json
+import re
+import io
+import pypdf
+from datetime import date as date_type
 
 os.environ["GOOGLE_API_KEY"] = os.environ.get("GEMINI_API_KEY", "")
 
@@ -53,8 +58,42 @@ missing_clause_agent = LlmAgent(
 summary_agent = LlmAgent(
     name='summary_agent',
     model='gemini-2.5-flash',
-    description='Produces the final structured risk report with redline memo.',
-    instruction='You are the Summary Agent for Lexara. You receive findings from all other agents. Compile everything into one clean final report. Your output must include: 1. Executive Summary: 3-4 sentences covering the biggest concerns. 2. Overall Risk Score: percentage and label High Medium or Low. 3. Risk Distribution: Label this clearly as CHART DATA - Total high risk clauses, medium risk clauses, low risk clauses. 4. Top 3 Most Dangerous Clauses: clause name, risk level, one sentence why it matters. 5. Contradictions Summary: total found and most serious explained. 6. Missing Protections Summary: total missing and most critical explained. 7. Full Clause Breakdown: every clause with risk level and explanation in numbered list. 8. Draft Redline Memo: professionally written memo the paralegal can edit and send, include all flagged issues and suggested changes in formal legal language.',
+    description='Produces the final structured risk report as JSON.',
+    instruction='''You are the Summary Agent for Lexara. You receive findings from all other agents. Compile everything into one final report.
+
+Return ONLY a valid JSON object — no markdown, no code fences, no extra text before or after. The JSON must match this exact structure:
+
+{
+  "executiveSummary": "3-4 sentences covering the biggest concerns",
+  "overallRisk": "high",
+  "riskPercentage": 75,
+  "chartData": [
+    {"name": "High Risk", "value": 5, "color": "#EF4444"},
+    {"name": "Medium Risk", "value": 3, "color": "#F59E0B"},
+    {"name": "Low Risk", "value": 8, "color": "#10B981"}
+  ],
+  "topDangerousClauses": [
+    {"title": "Clause Name", "risk": "high", "explanation": "One sentence why it matters"},
+    {"title": "Clause Name", "risk": "high", "explanation": "One sentence why it matters"},
+    {"title": "Clause Name", "risk": "high", "explanation": "One sentence why it matters"}
+  ],
+  "clauses": [
+    {"id": "1", "title": "Clause Type", "text": "Original clause text", "risk": "high", "explanation": "Risk explanation"}
+  ],
+  "contradictions": [
+    {"severity": "high", "description": "Plain English explanation of the conflict"}
+  ],
+  "missingProtections": [
+    {"risk": "high", "title": "Clause Name", "explanation": "Why it matters"}
+  ],
+  "redlineMemo": "Full professionally written redline memo with all flagged issues and suggested changes in formal legal language"
+}
+
+Rules:
+- Use only "high", "medium", or "low" (lowercase) for all risk fields.
+- If there are no contradictions, set "contradictions" to an empty array [].
+- If there are no missing protections, set "missingProtections" to an empty array [].
+- Return ONLY the JSON object, nothing else.''',
     tools=[],
 )
 
@@ -63,15 +102,62 @@ root_agent = LlmAgent(
     model='gemini-2.5-flash',
     description='Coordinates all Lexara sub-agents to perform a full contract review.',
     sub_agents=[clause_extractor_agent, risk_analyzer_agent, contradiction_detector_agent, missing_clause_agent, summary_agent],
-    instruction='You are the Lexara Orchestrator Agent, an AI-powered contract review assistant built for law firms and paralegals. When a contract is received, coordinate the following sequence: 1. Send the full contract to the Clause Extractor Agent. 2. Send extracted clauses to the Risk Analyzer Agent. 3. Send clauses to the Contradiction Detector Agent. 4. Send clauses to the Missing Clause Agent. 5. Collect all findings and send to the Summary Agent. Your final output must include: Overall risk score as High Medium or Low with percentage, Risk distribution data labeled as CHART DATA, Executive summary of biggest concerns, Clause by clause breakdown with risk levels, Contradictions found, Missing protections list, Draft redline memo written in professional legal language. You do not give legal advice. You surface issues for the legal professional to review.',
+    instruction='''You are the Lexara Orchestrator Agent, an AI-powered contract review assistant built for law firms and paralegals. When a contract is received, coordinate the following sequence:
+1. Send the full contract to the Clause Extractor Agent to extract and label all clauses.
+2. Send the extracted clauses to the Risk Analyzer Agent for risk scoring.
+3. Send the clauses to the Contradiction Detector Agent to find conflicts.
+4. Send the clauses to the Missing Clause Agent to identify missing protections.
+5. Collect all findings and send them to the Summary Agent.
+6. Return the Summary Agent JSON output exactly as-is, with no additional text, commentary, or formatting.
+
+Your final response must be ONLY the JSON object from the Summary Agent — nothing else.''',
     tools=[],
 )
+
+
+def extract_json(text: str):
+    """Try multiple strategies to extract valid JSON from LLM output."""
+    # Strategy 1: direct parse
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Strategy 2: extract from ```json ... ``` code block
+    match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', text)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Strategy 3: find the first {...} block spanning the whole output
+    match = re.search(r'\{[\s\S]*\}', text)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return None
+
 
 @app.post("/api/analyze")
 async def analyze_contract(file: UploadFile = File(...)):
     try:
         content = await file.read()
-        text = content.decode("utf-8", errors="ignore")
+
+        # Extract text from PDF using pypdf
+        try:
+            pdf_reader = pypdf.PdfReader(io.BytesIO(content))
+            text = ""
+            for page in pdf_reader.pages:
+                extracted = page.extract_text()
+                if extracted:
+                    text += extracted + "\n"
+        except Exception:
+            # Fallback for non-PDF or corrupted files
+            text = content.decode("utf-8", errors="ignore")
 
         if not text.strip():
             raise HTTPException(status_code=400, detail="Could not extract text from file")
@@ -101,14 +187,25 @@ async def analyze_contract(file: UploadFile = File(...)):
                 result = event.content.parts[0].text
                 break
 
-        return {"report": result}
+        report_data = extract_json(result)
+        if report_data is None:
+            raise HTTPException(status_code=500, detail="Failed to parse analysis results from AI")
 
+        report_data["filename"] = file.filename or "contract.pdf"
+        report_data["date"] = date_type.today().isoformat()
+
+        return report_data
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -43,7 +43,7 @@ export default function Report() {
   const [expandedClause, setExpandedClause] = useState<string | null>(null);
   const [memo, setMemo] = useState(report?.redlineMemo || '');
 
-  if (!report) {
+  if (!report || !report.overallRisk) {
     return (
       <div className="min-h-screen bg-navy-primary">
         <Navigation />
@@ -56,6 +56,12 @@ export default function Report() {
       </div>
     );
   }
+
+  const chartData = report.chartData ?? [];
+  const topDangerousClauses = report.topDangerousClauses ?? [];
+  const clauses = report.clauses ?? [];
+  const contradictions = report.contradictions ?? [];
+  const missingProtections = report.missingProtections ?? [];
 
   const getRiskBadgeClass = (risk: 'high' | 'medium' | 'low') => {
     const classes = {
@@ -134,7 +140,7 @@ export default function Report() {
               <ResponsiveContainer width="100%" height={200}>
                 <PieChart>
                   <Pie
-                    data={report.chartData}
+                    data={chartData}
                     cx="50%"
                     cy="50%"
                     innerRadius={60}
@@ -142,7 +148,7 @@ export default function Report() {
                     paddingAngle={5}
                     dataKey="value"
                   >
-                    {report.chartData.map((entry, index) => (
+                    {chartData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
@@ -163,7 +169,7 @@ export default function Report() {
               Top 3 Most Dangerous Clauses
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {report.topDangerousClauses.map((clause, index) => (
+              {topDangerousClauses.map((clause, index) => (
                 <div
                   key={index}
                   className="bg-navy-primary rounded-lg p-6 border-2 border-risk-high"
@@ -185,7 +191,7 @@ export default function Report() {
           <div className="bg-navy-secondary rounded-xl p-8">
             <h3 className="text-2xl font-bold text-white mb-6">Full Clause Breakdown</h3>
             <div className="space-y-3">
-              {report.clauses.map((clause) => (
+              {clauses.map((clause) => (
                 <div
                   key={clause.id}
                   className={`bg-navy-primary rounded-lg overflow-hidden border-l-4 ${getRiskBorderClass(
@@ -235,11 +241,11 @@ export default function Report() {
             </div>
           </div>
 
-          {report.contradictions.length > 0 && (
+          {contradictions.length > 0 && (
             <div className="bg-navy-secondary rounded-xl p-8">
               <h3 className="text-2xl font-bold text-white mb-6">Contradictions Found</h3>
               <div className="space-y-4">
-                {report.contradictions.map((contradiction, index) => (
+                {contradictions.map((contradiction, index) => (
                   <div
                     key={index}
                     className="bg-navy-primary rounded-lg p-6 border-l-4 border-l-risk-high"
@@ -258,11 +264,11 @@ export default function Report() {
             </div>
           )}
 
-          {report.missingProtections.length > 0 && (
+          {missingProtections.length > 0 && (
             <div className="bg-navy-secondary rounded-xl p-8">
               <h3 className="text-2xl font-bold text-white mb-6">Missing Protections</h3>
               <div className="space-y-4">
-                {report.missingProtections.map((protection, index) => (
+                {missingProtections.map((protection, index) => (
                   <div
                     key={index}
                     className={`bg-navy-primary rounded-lg p-6 border-l-4 ${getRiskBorderClass(
