@@ -2,3 +2,4 @@ google-adk
 fastapi
 uvicorn
 python-multipart
+pypdf
