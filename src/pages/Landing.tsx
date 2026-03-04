@@ -26,7 +26,7 @@ export default function Landing() {
             transition={{ duration: 0.8 }}
           >
             Contract Review in{' '}
-            <span className="text-gold">30 Seconds</span>
+            <span className="text-gold">2 Minutes</span>
           </motion.h1>
           <motion.p
             className="text-xl text-gray-muted max-w-3xl mx-auto mb-12"
