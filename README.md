@@ -73,6 +73,4 @@ Lexara demonstrates that the core contract review workflow, clause extraction, r
 
 A review that used to take hours now takes two minutes. That is the whole point.
 
----
 
-Built for GenAI Genesis 2026.
