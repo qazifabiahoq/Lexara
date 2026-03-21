@@ -39,6 +39,18 @@ This agent checks the contract against a list of twelve standard clause types th
 **Agent 5 is the Summary Agent.**
 This is the final synthesis step. The summary agent receives everything the first four agents found and compiles it into a structured JSON report. It writes a three to four sentence executive summary covering the biggest concerns, identifies the top three most dangerous clauses, and generates a complete redline memo written in professional legal language. This is the document the attorney reviews, edits, and acts on.
 
+## Rule-Based Decision Layer
+
+In addition to the five AI agents, Lexara runs a deterministic rule engine at three points in the pipeline. These rules do not use AI — they execute instantly, produce consistent outputs, and act as a check on the AI agents rather than a replacement for them.
+
+**Pre-flight contract validation.** Before any agent runs, a rule-based validator checks word count and text quality ratios. Contracts under 80 words are rejected with an error. Contracts with very low average word length are flagged as potentially garbled OCR. This prevents the AI pipeline from wasting time on bad input and surfaces file extraction issues directly to the user.
+
+**Contract type detection.** A keyword-frequency classifier scores the extracted text against six contract types: NDA, employment, SaaS, service agreement, lease, and purchase. The highest-scoring type is identified and passed into the pipeline in two ways. First, the clause extractor receives the detected type as context so it can apply appropriate labeling. Second, the missing clause agent receives a type-specific checklist of required clauses rather than a generic one. An NDA pipeline checks for confidentiality and IP ownership. An employment contract pipeline checks for non-compete, termination notice, and salary terms. A SaaS contract checks for liability cap, SLA, and data processing protections.
+
+**Post-AI risk override.** After the summary agent produces its JSON report, the rule engine recomputes the overall risk score deterministically from the raw clause counts in the chart data. High-risk clauses are weighted at full value and medium-risk clauses at half. The formula produces a consistent percentage regardless of how the AI chose to phrase its summary. If the computed risk level is higher than what the AI reported, the rule engine escalates it and adds a plain-English flag to the report explaining the escalation. This flag appears as a banner at the top of the report UI.
+
+The rule engine ensures the system behaves predictably on edge cases, produces auditable risk scores, and adapts its missing-clause analysis to what kind of contract is actually being reviewed.
+
 ## Why Multi-Agent Architecture
 
 A single AI model given all five tasks at once produces inconsistent results that are hard to audit and harder to trust. Separating the work into five specialized agents means each one can be optimized independently for exactly what it needs to do. The clause extractor never has to think about contradiction logic. The missing clause agent never has to think about risk scoring. The summary agent has the benefit of four structured expert inputs before it writes a single sentence.
