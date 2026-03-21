@@ -36,6 +36,9 @@ interface Report {
   contradictions: Contradiction[];
   missingProtections: MissingProtection[];
   redlineMemo: string;
+  contractType?: string;
+  ruleFlags?: string[];
+  textStats?: { wordCount: number; warnings: string[] };
 }
 
 export default function Report() {
@@ -206,6 +209,11 @@ export default function Report() {
             >
               {report.overallRisk} Risk
             </span>
+            {report.contractType && (
+              <span className="px-3 py-1 rounded-lg border border-gold/40 text-gold/80 text-xs font-semibold uppercase tracking-wide">
+                {report.contractType}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-4">
             <button
@@ -228,6 +236,32 @@ export default function Report() {
 
       <div className="pt-8 pb-20 px-6">
         <div className="max-w-7xl mx-auto space-y-8">
+          {(report.ruleFlags && report.ruleFlags.length > 0) && (
+            <div className="bg-risk-high/10 border border-risk-high/40 rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle className="w-5 h-5 text-risk-high" />
+                <span className="text-risk-high font-semibold text-sm uppercase tracking-wide">Rule Engine Alert</span>
+              </div>
+              <ul className="space-y-1">
+                {report.ruleFlags.map((flag, i) => (
+                  <li key={i} className="text-sm text-white/80">{flag}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {(report.textStats?.warnings && report.textStats.warnings.length > 0) && (
+            <div className="bg-risk-medium/10 border border-risk-medium/40 rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle className="w-5 h-5 text-risk-medium" />
+                <span className="text-risk-medium font-semibold text-sm uppercase tracking-wide">Text Quality Warnings</span>
+              </div>
+              <ul className="space-y-1">
+                {report.textStats.warnings.map((w, i) => (
+                  <li key={i} className="text-sm text-white/80">{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="bg-navy-secondary rounded-xl p-8">
               <h3 className="text-2xl font-bold text-white mb-6">Risk Overview</h3>

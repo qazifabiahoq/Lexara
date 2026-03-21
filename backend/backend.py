@@ -18,6 +18,194 @@ os.environ["GOOGLE_API_KEY"] = os.environ.get("GEMINI_API_KEY", "")
 
 app = FastAPI()
 
+
+# ---------------------------------------------------------------------------
+# Rule-based decision layer
+# ---------------------------------------------------------------------------
+
+# Keywords that identify each contract type. More matches = higher confidence.
+_CONTRACT_TYPE_KEYWORDS: dict[str, list[str]] = {
+    "nda": [
+        "non-disclosure", "nda", "confidential information", "trade secret",
+        "proprietary information", "return of materials", "confidentiality agreement",
+    ],
+    "employment": [
+        "employee", "employer", "salary", "wages", "at-will", "job title",
+        "benefits", "paid time off", "performance review", "termination for cause",
+        "offer letter", "compensation",
+    ],
+    "saas": [
+        "software as a service", "saas", "subscription", "api", "uptime",
+        "sla", "service level", "user account", "data processing", "cloud",
+        "license", "software license",
+    ],
+    "service": [
+        "services", "independent contractor", "deliverable", "statement of work",
+        "milestone", "consulting", "professional services", "scope of work",
+    ],
+    "lease": [
+        "lease", "tenant", "landlord", "rent", "premises", "eviction",
+        "security deposit", "occupancy", "lessor", "lessee",
+    ],
+    "purchase": [
+        "purchase order", "buyer", "seller", "goods", "delivery",
+        "warranty of title", "invoice", "purchase price", "bill of sale",
+    ],
+}
+
+# Clauses that are required / highly expected per contract type.
+_REQUIRED_CLAUSES_BY_TYPE: dict[str, list[str]] = {
+    "nda": [
+        "Governing Law", "Dispute Resolution", "Termination",
+        "Confidentiality and NDA", "Intellectual Property Ownership",
+        "Amendment Process",
+    ],
+    "employment": [
+        "Governing Law", "Dispute Resolution", "Termination and Notice Period",
+        "Payment Terms", "Non-Compete", "Intellectual Property Ownership",
+        "Confidentiality and NDA", "Amendment Process",
+    ],
+    "saas": [
+        "Governing Law", "Dispute Resolution", "Termination",
+        "Liability Cap", "Indemnification", "Warranties and Representations",
+        "Assignment Rights", "Amendment Process", "Confidentiality and NDA",
+    ],
+    "service": [
+        "Governing Law", "Dispute Resolution", "Termination and Notice Period",
+        "Payment Terms", "Liability Cap", "Indemnification",
+        "Warranties and Representations", "Amendment Process", "Assignment Rights",
+    ],
+    "lease": [
+        "Governing Law", "Dispute Resolution", "Termination and Notice Period",
+        "Payment Terms", "Force Majeure", "Assignment Rights", "Amendment Process",
+    ],
+    "purchase": [
+        "Governing Law", "Dispute Resolution", "Termination",
+        "Payment Terms", "Warranties and Representations", "Liability Cap",
+        "Force Majeure", "Indemnification",
+    ],
+    "general": [
+        "Governing Law", "Dispute Resolution", "Termination",
+        "Payment Terms", "Liability Cap", "Indemnification",
+        "Confidentiality and NDA", "Force Majeure", "Amendment Process",
+    ],
+}
+
+
+def detect_contract_type(text: str) -> str:
+    """
+    Rule-based contract type classifier using keyword frequency scoring.
+
+    Scores each known contract type by how many of its marker keywords appear
+    in the lowercased text.  Returns the highest-scoring type, or "general"
+    when no type scores above zero.
+    """
+    lower = text.lower()
+    scores: dict[str, int] = {
+        ctype: sum(1 for kw in keywords if kw in lower)
+        for ctype, keywords in _CONTRACT_TYPE_KEYWORDS.items()
+    }
+    best_type = max(scores, key=lambda k: scores[k])
+    return best_type if scores[best_type] > 0 else "general"
+
+
+def get_required_clauses_for_type(contract_type: str) -> list[str]:
+    """Return the mandatory clause checklist for the detected contract type."""
+    return _REQUIRED_CLAUSES_BY_TYPE.get(contract_type, _REQUIRED_CLAUSES_BY_TYPE["general"])
+
+
+def validate_contract_text(text: str) -> dict:
+    """
+    Pre-flight rule checks before any AI agent is invoked.
+
+    Checks:
+    - Minimum word count (too short → likely a bad extraction or wrong file)
+    - Maximum word count (warn when extremely long)
+    - Average word length (very low ratio signals garbled OCR output)
+
+    Returns a dict with word_count, char_count, warnings, and is_valid.
+    """
+    words = text.split()
+    word_count = len(words)
+    char_count = len(text)
+    warnings: list[str] = []
+
+    if word_count < 80:
+        warnings.append(
+            f"Contract text is very short ({word_count} words). "
+            "Text extraction may have failed or the file may not be a contract."
+        )
+    if word_count > 60_000:
+        warnings.append(
+            f"Contract is very long ({word_count:,} words). "
+            "Analysis accuracy may decrease for extremely large documents."
+        )
+    avg_word_len = (char_count / word_count) if word_count else 0
+    if word_count >= 80 and avg_word_len < 3.0:
+        warnings.append(
+            "Text quality appears low (possibly garbled OCR). "
+            "Review the extracted text before trusting the analysis."
+        )
+
+    return {
+        "word_count": word_count,
+        "char_count": char_count,
+        "warnings": warnings,
+        "is_valid": word_count >= 50,
+    }
+
+
+def compute_risk_override(report_data: dict) -> dict:
+    """
+    Post-AI deterministic risk classification applied over the AI-generated report.
+
+    Rules:
+    - Recomputes riskPercentage from chartData clause counts so it is always
+      consistent with what the agents found (AI sometimes rounds loosely).
+    - Overrides overallRisk label based on hard thresholds:
+        high   → 3+ high-risk clauses, OR computed percentage ≥ 65
+        medium → 1+ high-risk clause,  OR computed percentage ≥ 30
+        low    → everything else
+    - If the rule engine escalates beyond the AI's own label, a ruleFlags
+      entry is added to the report so the reviewer can see why.
+    """
+    chart_data = report_data.get("chartData", [])
+
+    high_count = next((d["value"] for d in chart_data if d["name"] == "High Risk"), 0)
+    medium_count = next((d["value"] for d in chart_data if d["name"] == "Medium Risk"), 0)
+    low_count = next((d["value"] for d in chart_data if d["name"] == "Low Risk"), 0)
+    total = high_count + medium_count + low_count
+
+    if total == 0:
+        return report_data
+
+    # Weighted percentage: high clauses count full, medium count half.
+    computed_pct = round((high_count * 100 + medium_count * 50) / total)
+
+    if high_count >= 3 or computed_pct >= 65:
+        computed_risk = "high"
+    elif high_count >= 1 or computed_pct >= 30:
+        computed_risk = "medium"
+    else:
+        computed_risk = "low"
+
+    ai_risk = report_data.get("overallRisk", "medium")
+    rule_flags: list[str] = report_data.get("ruleFlags", [])
+
+    _risk_order = {"low": 0, "medium": 1, "high": 2}
+    if _risk_order.get(computed_risk, 1) > _risk_order.get(ai_risk, 1):
+        rule_flags.append(
+            f"Risk escalated from '{ai_risk}' to '{computed_risk}' by rule engine "
+            f"({high_count} high-risk clause(s) found; weighted score {computed_pct}%)."
+        )
+
+    report_data["overallRisk"] = computed_risk
+    report_data["riskPercentage"] = computed_pct
+    if rule_flags:
+        report_data["ruleFlags"] = rule_flags
+
+    return report_data
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -164,14 +352,40 @@ async def analyze_contract(file: UploadFile = File(...)):
         if not text.strip():
             raise HTTPException(status_code=400, detail="Could not extract text from file")
 
-        # Step 1: extract clauses
-        clauses = await run_agent(clause_extractor_agent, text)
+        # --- Rule-based pre-flight checks ---
+        text_stats = validate_contract_text(text)
+        if not text_stats["is_valid"]:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Contract text too short ({text_stats['word_count']} words). "
+                    "Please upload a valid contract document."
+                ),
+            )
 
-        # Steps 2-4: run in parallel — all take clauses as input
+        # --- Rule-based contract type detection ---
+        contract_type = detect_contract_type(text)
+        required_clauses = get_required_clauses_for_type(contract_type)
+        required_clauses_str = ", ".join(required_clauses)
+
+        # Step 1: extract clauses (inject contract type as context)
+        extraction_input = (
+            f"CONTRACT TYPE (detected): {contract_type.upper()}\n\n"
+            f"CONTRACT TEXT:\n{text}"
+        )
+        clauses = await run_agent(clause_extractor_agent, extraction_input)
+
+        # Steps 2-4: run in parallel — all take clauses as input.
+        # Missing clause agent receives the type-specific required-clause checklist.
+        missing_input = (
+            f"CONTRACT TYPE: {contract_type.upper()}\n"
+            f"REQUIRED CLAUSES FOR THIS CONTRACT TYPE: {required_clauses_str}\n\n"
+            f"EXTRACTED CLAUSES:\n{clauses}"
+        )
         risks, contradictions, missing = await asyncio.gather(
             run_agent(risk_analyzer_agent, clauses),
             run_agent(contradiction_detector_agent, clauses),
-            run_agent(missing_clause_agent, clauses),
+            run_agent(missing_clause_agent, missing_input),
         )
 
         # Step 5: compile final report
@@ -190,8 +404,16 @@ async def analyze_contract(file: UploadFile = File(...)):
                 detail=f"Failed to parse analysis results. Raw output: {report_text[:500]}"
             )
 
+        # --- Rule-based post-AI risk override ---
+        report_data = compute_risk_override(report_data)
+
         report_data["filename"] = file.filename or "contract.pdf"
         report_data["date"] = date_type.today().isoformat()
+        report_data["contractType"] = contract_type
+        report_data["textStats"] = {
+            "wordCount": text_stats["word_count"],
+            "warnings": text_stats["warnings"],
+        }
 
         return report_data
 
