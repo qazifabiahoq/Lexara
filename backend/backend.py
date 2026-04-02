@@ -206,6 +206,175 @@ def compute_risk_override(report_data: dict) -> dict:
 
     return report_data
 
+
+def detect_auto_renewal(text: str) -> list[str]:
+    """
+    Detects auto-renewal clauses that could silently extend the contract term.
+
+    These clauses are commonly missed by reviewers and can lock a party into
+    another full term if cancellation notice is not sent before the deadline.
+    """
+    lower = text.lower()
+    patterns = [
+        "automatically renew", "auto-renew", "auto renew",
+        "shall renew automatically", "will renew automatically",
+        "successive terms", "successive periods", "rolling renewal",
+        "unless cancelled", "unless terminated prior", "unless written notice of cancellation",
+        "evergreen clause", "automatically extended",
+    ]
+    if any(p in lower for p in patterns):
+        return [
+            "Auto-renewal clause detected. The contract may renew automatically "
+            "unless a party sends written cancellation notice before the deadline. "
+            "Verify the required notice period and calendar it."
+        ]
+    return []
+
+
+def detect_unilateral_modification(text: str) -> list[str]:
+    """
+    Detects clauses that allow one party to change contract terms without
+    the other party's agreement.
+
+    This is a high-risk pattern common in SaaS terms and vendor agreements.
+    """
+    lower = text.lower()
+    patterns = [
+        "may amend at any time", "may modify at any time",
+        "reserves the right to modify", "reserves the right to change",
+        "at its sole discretion", "at our sole discretion",
+        "may update these terms", "unilaterally modify", "unilaterally amend",
+        "right to change the terms", "may change this agreement",
+        "may revise these terms",
+    ]
+    if any(p in lower for p in patterns):
+        return [
+            "Unilateral modification clause detected. One party may be able to "
+            "change contract terms without the other party's consent. "
+            "This removes the mutual agreement requirement for amendments."
+        ]
+    return []
+
+
+def detect_arbitration_and_waivers(text: str) -> list[str]:
+    """
+    Detects mandatory arbitration clauses and class action waivers.
+
+    Mandatory arbitration removes the right to sue in court.
+    Class action waivers prevent joining group lawsuits.
+    Both are significant rights-limiting provisions that reviewers should flag.
+    """
+    flags: list[str] = []
+    lower = text.lower()
+    arbitration_patterns = [
+        "binding arbitration", "mandatory arbitration",
+        "shall be resolved by arbitration", "disputes shall be arbitrated",
+        "final and binding arbitration", "american arbitration association",
+        "aaa arbitration", "jams arbitration",
+        "arbitrator's decision shall be final", "submit to arbitration",
+        "resolved through arbitration", "arbitration proceedings",
+    ]
+    class_action_patterns = [
+        "class action waiver", "waive any right to class",
+        "no class action", "class arbitration waived",
+        "waiver of class action", "class or collective action",
+    ]
+    if any(p in lower for p in arbitration_patterns):
+        flags.append(
+            "Mandatory arbitration clause detected. Disputes must go through "
+            "private arbitration rather than court litigation. "
+            "This removes the right to a jury trial."
+        )
+    if any(p in lower for p in class_action_patterns):
+        flags.append(
+            "Class action waiver detected. The right to bring or join "
+            "class action lawsuits is waived under this contract."
+        )
+    return flags
+
+
+def detect_perpetual_grants(text: str) -> list[str]:
+    """
+    Detects perpetual, irrevocable, or unlimited IP and data rights grants.
+
+    These clauses can permanently transfer valuable rights without the party
+    realising it. Common in SaaS, platform, and work-for-hire agreements.
+    """
+    flags: list[str] = []
+    lower = text.lower()
+    license_patterns = [
+        "perpetual license", "irrevocable license", "perpetual and irrevocable",
+        "irrevocable right", "perpetual right", "royalty-free perpetual",
+        "in perpetuity", "unlimited license", "perpetual grant",
+        "non-revocable license", "irrevocably grants",
+    ]
+    ownership_patterns = [
+        "work made for hire", "assigns all intellectual property",
+        "all inventions shall be owned", "all work product shall be owned",
+        "irrevocable right to use your data", "perpetual right to use your data",
+        "irrevocable license to your content",
+    ]
+    if any(p in lower for p in license_patterns):
+        flags.append(
+            "Perpetual or irrevocable license detected. Rights granted under "
+            "this clause may never expire or be revoked after signing."
+        )
+    if any(p in lower for p in ownership_patterns):
+        flags.append(
+            "Broad IP or work product ownership clause detected. The counterparty "
+            "may retain permanent ownership over data, content, or work created "
+            "under this agreement."
+        )
+    return flags
+
+
+def extract_governing_law(text: str) -> str | None:
+    """
+    Extracts the governing law jurisdiction from the contract text.
+
+    Looks for standard 'governed by the laws of [jurisdiction]' language.
+    Returns the jurisdiction string if found, or None if not detected.
+    """
+    patterns = [
+        r"governed by (?:the )?laws of (?:the (?:state|commonwealth) of )?([A-Z][a-zA-Z ]+?)(?:\.|,|\s(?:and|without|courts|excluding))",
+        r"laws of (?:the (?:state|commonwealth) of )?([A-Z][a-zA-Z ]+?)(?:\.|,|\s(?:shall|and|without|courts|govern|apply))",
+        r"(?:jurisdiction|venue) (?:shall be|is) (?:the (?:courts? of )?)?([A-Z][a-zA-Z ]+?)(?:\.|,|\s(?:and|for|courts|only))",
+        r"construed (?:in accordance with|under) (?:the )?laws of (?:the )?([A-Z][a-zA-Z ]+?)(?:\.|,)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            jurisdiction = match.group(1).strip()
+            if 3 <= len(jurisdiction) <= 60:
+                return jurisdiction
+    return None
+
+
+def detect_liquidated_damages(text: str) -> list[str]:
+    """
+    Detects liquidated damages, penalty clauses, and fixed financial penalties.
+
+    These provisions set predetermined financial consequences for breach or
+    late performance. They can be enforceable or challenged depending on
+    jurisdiction, and reviewers should always flag them for scrutiny.
+    """
+    lower = text.lower()
+    patterns = [
+        "liquidated damages", "penalty clause", "punitive damages",
+        "damages of $", "penalty of $", "daily penalty", "per day penalty",
+        "late payment fee", "late payment penalty", "breach penalty",
+        "agreed damages", "predetermined damages", "fixed damages",
+        "contractual penalty", "delay penalty",
+    ]
+    if any(p in lower for p in patterns):
+        return [
+            "Liquidated damages or penalty clause detected. Fixed financial "
+            "penalties may apply for breach, late delivery, or late payment. "
+            "Verify whether the penalty amount is proportionate and enforceable."
+        ]
+    return []
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -368,6 +537,15 @@ async def analyze_contract(file: UploadFile = File(...)):
         required_clauses = get_required_clauses_for_type(contract_type)
         required_clauses_str = ", ".join(required_clauses)
 
+        # --- Rule-based content scanning (runs before AI agents) ---
+        pre_ai_flags: list[str] = []
+        pre_ai_flags.extend(detect_auto_renewal(text))
+        pre_ai_flags.extend(detect_unilateral_modification(text))
+        pre_ai_flags.extend(detect_arbitration_and_waivers(text))
+        pre_ai_flags.extend(detect_perpetual_grants(text))
+        pre_ai_flags.extend(detect_liquidated_damages(text))
+        governing_law = extract_governing_law(text)
+
         # Step 1: extract clauses (inject contract type as context)
         extraction_input = (
             f"CONTRACT TYPE (detected): {contract_type.upper()}\n\n"
@@ -406,6 +584,13 @@ async def analyze_contract(file: UploadFile = File(...)):
 
         # --- Rule-based post-AI risk override ---
         report_data = compute_risk_override(report_data)
+
+        # Merge pre-AI content scan flags into the final report
+        if pre_ai_flags:
+            existing_flags = report_data.get("ruleFlags", [])
+            report_data["ruleFlags"] = pre_ai_flags + existing_flags
+        if governing_law:
+            report_data["governingLaw"] = governing_law
 
         report_data["filename"] = file.filename or "contract.pdf"
         report_data["date"] = date_type.today().isoformat()
