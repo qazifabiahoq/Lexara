@@ -41,15 +41,43 @@ This is the final synthesis step. The summary agent receives everything the firs
 
 ## Rule-Based Decision Layer
 
-In addition to the five AI agents, Lexara runs a deterministic rule engine at three points in the pipeline. These rules do not use AI — they execute instantly, produce consistent outputs, and act as a check on the AI agents rather than a replacement for them.
+In addition to the five AI agents, Lexara runs a deterministic rule engine at multiple points in the pipeline. These rules do not use AI. They execute instantly, produce consistent outputs every time, and act as a check on the AI agents rather than a replacement for them.
 
-**Pre-flight contract validation.** Before any agent runs, a rule-based validator checks word count and text quality ratios. Contracts under 80 words are rejected with an error. Contracts with very low average word length are flagged as potentially garbled OCR. This prevents the AI pipeline from wasting time on bad input and surfaces file extraction issues directly to the user.
+**Pre-flight contract validation.** Before any agent runs, a rule-based validator checks word count and text quality. Contracts under 50 words are rejected with an error. Contracts under 80 words get a warning that text extraction may have failed. Contracts with very low average word length are flagged as potentially garbled OCR output. This prevents the AI pipeline from wasting time on bad input and surfaces file extraction problems directly to the user.
 
-**Contract type detection.** A keyword-frequency classifier scores the extracted text against six contract types: NDA, employment, SaaS, service agreement, lease, and purchase. The highest-scoring type is identified and passed into the pipeline in two ways. First, the clause extractor receives the detected type as context so it can apply appropriate labeling. Second, the missing clause agent receives a type-specific checklist of required clauses rather than a generic one. An NDA pipeline checks for confidentiality and IP ownership. An employment contract pipeline checks for non-compete, termination notice, and salary terms. A SaaS contract checks for liability cap, SLA, and data processing protections.
+**Contract type detection.** A keyword-frequency classifier scores the extracted text against six contract types: NDA, employment, SaaS, service agreement, lease, and purchase. The highest-scoring type is identified and passed into the pipeline in two ways. The clause extractor receives the detected type as context so it applies appropriate labeling. The missing clause agent receives a type-specific checklist of required clauses rather than a generic list. An NDA pipeline checks for confidentiality and IP ownership. An employment pipeline checks for non-compete, termination notice, and salary terms. A SaaS pipeline checks for liability cap, SLA, and data processing protections.
 
-**Post-AI risk override.** After the summary agent produces its JSON report, the rule engine recomputes the overall risk score deterministically from the raw clause counts in the chart data. High-risk clauses are weighted at full value and medium-risk clauses at half. The formula produces a consistent percentage regardless of how the AI chose to phrase its summary. If the computed risk level is higher than what the AI reported, the rule engine escalates it and adds a plain-English flag to the report explaining the escalation. This flag appears as a banner at the top of the report UI.
+**Pre-AI content scanning.** Before the AI agents run, six pattern-based detectors scan the raw contract text for specific high-risk clause patterns that should always be flagged regardless of how the AI interprets them. These detectors check for auto-renewal clauses, unilateral modification rights, mandatory arbitration clauses, class action waivers, perpetual or irrevocable IP grants, and liquidated damages or penalty provisions. Each detector runs against the full text using keyword and phrase matching. Any matches are collected as rule flags and shown in the report alongside the AI findings. The governing law jurisdiction is also extracted at this stage and shown in the report header.
 
-The rule engine ensures the system behaves predictably on edge cases, produces auditable risk scores, and adapts its missing-clause analysis to what kind of contract is actually being reviewed.
+**Post-AI risk override.** After the summary agent produces its JSON report, the rule engine recomputes the overall risk score deterministically from the raw clause counts. High-risk clauses are weighted at full value and medium-risk clauses at half. The formula produces a consistent percentage regardless of how the AI phrased its summary. If the computed risk level is higher than what the AI reported, the rule engine escalates it and adds a plain-English explanation to the report. This flag appears as a banner at the top of the report UI.
+
+The rule engine ensures the system behaves predictably, produces auditable risk scores, flags specific dangerous patterns that are easy to miss, and adapts its missing-clause analysis to the type of contract being reviewed.
+
+## Guardrails
+
+Lexara uses a set of hard-coded guardrails that run independently of the AI agents. These are not suggestions or heuristics. They are deterministic checks that always run, always produce the same output for the same input, and cannot be influenced by how the AI interprets the contract.
+
+This matters because AI models can miss things, phrase findings inconsistently, or underreport risk. The guardrails exist to catch what should never slip through regardless of AI behavior.
+
+**Input validation guardrail.** The contract text must meet a minimum quality threshold before the pipeline runs at all. If the text is too short or looks like garbled OCR output, the user is warned or blocked. This prevents the AI from hallucinating analysis on broken input.
+
+**Contract type classifier.** The system determines what kind of contract it is reading using keyword frequency scoring, not by asking the AI. This means the missing clause checklist the AI receives is always calibrated to the correct contract type. An NDA always gets checked for confidentiality and IP clauses. An employment contract always gets checked for non-compete and payment terms. This does not depend on the AI making the right call.
+
+**Auto-renewal detector.** Scans the contract for language like "automatically renew", "successive terms", "unless cancelled", and similar phrases. Auto-renewal clauses are one of the most commonly missed contract risks because they are often buried in boilerplate. If found, a flag is added to the report with a plain-English explanation and a note to calendar the cancellation deadline.
+
+**Unilateral modification detector.** Scans for language like "may amend at any time", "at its sole discretion", "reserves the right to modify", and similar phrases. These clauses allow one party to change the contract without the other's agreement. They are a serious risk in vendor and SaaS agreements and often go unnoticed. If found, the report flags the specific risk.
+
+**Arbitration and class action waiver detector.** Scans for mandatory arbitration language and class action waiver language separately. Mandatory arbitration removes the right to sue in court. A class action waiver removes the right to join group lawsuits. Both are rights-limiting provisions that many reviewers overlook. Each triggers its own distinct flag in the report.
+
+**Perpetual and irrevocable rights detector.** Scans for language like "perpetual license", "irrevocable right", "in perpetuity", "work made for hire", and similar phrases. These clauses can permanently transfer intellectual property or data rights to the counterparty without the signing party realising it. This detector runs separately for license grants and for data or work product ownership.
+
+**Liquidated damages detector.** Scans for penalty clauses, liquidated damages provisions, fixed fee penalties for breach or late payment, and similar language. These provisions set predetermined financial consequences that may be disproportionate or unenforceable. If found, the report flags the clause and notes that the amount should be reviewed for proportionality.
+
+**Governing law extractor.** Identifies the jurisdiction whose law governs the contract using pattern matching on standard governing law language. The detected jurisdiction is shown in the report header so the reviewer immediately knows which state or country's laws apply. If no governing law clause is found, the missing clause agent is already configured to flag it.
+
+**Post-AI risk recomputation.** After the AI produces its report, the rule engine independently recalculates the risk percentage from the raw clause counts using a weighted formula. High-risk clauses count at full weight, medium-risk clauses at half. If this computed score is higher than what the AI reported, the risk level is escalated and the report explains why. This ensures the final risk rating is always consistent with the actual clause breakdown, not just with whatever the AI chose to write.
+
+All guardrail flags are collected and displayed in the report alongside the AI findings. They appear first in the flags section so the reviewer sees the deterministic findings before the AI-generated ones.
 
 ## Why Multi-Agent Architecture
 
