@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { Download, Copy, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
+import { useLocation, useNavigate, Link } from 'react-router-dom';
+import { Download, Copy, ChevronDown, ChevronUp, AlertTriangle, RotateCcw } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts';
 import Navigation from '../components/Navigation';
 import jsPDF from 'jspdf';
@@ -216,6 +216,13 @@ export default function Report() {
             )}
           </div>
           <div className="flex items-center gap-4">
+            <Link
+              to="/upload"
+              className="flex items-center gap-2 bg-navy-primary hover:bg-navy-primary/80 text-white px-4 py-2 rounded-lg font-medium transition-colors border border-white/10"
+            >
+              <RotateCcw className="w-4 h-4" />
+              Analyze Again
+            </Link>
             <button
               onClick={downloadReport}
               className="flex items-center gap-2 bg-navy-primary hover:bg-navy-primary/80 text-white px-4 py-2 rounded-lg font-medium transition-colors"
